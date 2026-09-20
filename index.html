@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Neurolink Mobile</title>
+<style>
+    * {
+        box-sizing: border-box;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+    body {
+        background-color: #050505;
+        color: #e0e0e0;
+        font-family: 'Courier New', Courier, monospace, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        height: 100dvh;
+        margin: 0;
+        padding: 15px;
+    }
+    #game-viewport {
+        width: 100%;
+        max-width: 420px;
+        height: 740px;
+        max-height: calc(100dvh - 30px);
+        background-color: #000;
+        border: 3px solid #222;
+        border-radius: 20px;
+        box-shadow: 0 0 35px rgba(0, 0, 0, 0.9);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+        transition: all 0.3s ease;
+    }
+    /* 真正在手機瀏覽器開啟時，讓遊戲畫面撐滿整個螢幕，變成一個手機面板app，而不是縮在畫面中間的一個小方框 */
+    @media (max-width: 480px) {
+        body { padding: 0; }
+        #game-viewport {
+            max-width: 100%;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            max-height: 100dvh;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        #controls { max-height: 42dvh; }
+    }
+
+    #handheld-phone-bar {
+        background-color: #111;
+        padding: 12px 15px;
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        border-bottom: 2px solid #222;
+        font-weight: bold;
+        z-index: 10;
+    }
+    #handheld-phone-bar.stat-hidden, #inventory-bar.stat-hidden { display: none; }
+    #temp-stat-wrap.stat-hidden { display: none; }
+    .status-danger { color: #ff3333; animation: blink 0.8s infinite; }
+    .status-warn { color: #ffcc00; }
+    .status-good { color: #33cc33; }
+
+    #inventory-bar {
+        background-color: #0a0a0a;
+        padding: 6px 15px;
+        font-size: 11px;
+        color: #888;
+        border-bottom: 1px solid #1a1a1a;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    #story-container {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+    .story-text {
+        line-height: 1.7;
+        font-size: 13.5px;
+        white-space: pre-line;
+        text-align: left;
+    }
+
+    .warning-text { color: #ff4444; font-weight: bold; }
+    .glitch-text { color: #ff00ff; text-shadow: 1px 1px #00ffff; }
+    .room-label { color: #666; font-size: 11px; letter-spacing: 2px; }
+
+    #controls {
+        padding: 15px;
+        background-color: #0a0a0a;
+        border-top: 1px solid #222;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 340px;
+        overflow-y: auto;
+    }
+    button {
+        background-color: #1a1a1a;
+        color: #00ffcc;
+        border: 1px solid #00ffcc;
+        padding: 11px;
+        border-radius: 6px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: left;
+        font-family: inherit;
+        touch-action: manipulation;
+    }
+    /* 只在真的有滑鼠可以 hover 的裝置上套用反白，避免手機點擊後殘留反白(手機的 :hover 會卡在最後點過的按鈕上) */
+    @media (hover: hover) and (pointer: fine) {
+        button:hover:not(:disabled) {
+            background-color: #00ffcc;
+            color: #000;
+        }
+    }
+    button:active:not(:disabled) {
+        background-color: #00ffcc;
+        color: #000;
+    }
+    button:focus-visible { outline: 2px solid #00ffcc; outline-offset: 2px; }
+    button:focus:not(:focus-visible) { outline: none; }
+    button:disabled {
+        border-color: #333;
+        color: #555;
+        cursor: not-allowed;
+    }
+    .btn-charge { touch-action: none; }
+    .floor-header {
+        color: #555;
+        font-size: 11px;
+        letter-spacing: 2px;
+        margin-top: 6px;
+        padding-left: 2px;
+    }
+
+    .light-on { background-color: #121218 !important; }
+    .overheat-screen {
+        border-color: #ff3333 !important;
+        box-shadow: 0 0 50px rgba(255, 0, 0, 0.5) !important;
+        animation: pulse-red 1.5s infinite alternate;
+    }
+
+    @keyframes blink { 50% { opacity: 0.3; } }
+    @keyframes pulse-red {
+        0% { background-color: #000; }
+        100% { background-color: #1a0000; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .status-danger { animation: none; opacity: 1; }
+        .overheat-screen { animation: none; background-color: #1a0000; }
+    }
+</style>
+</head>
+<body>
+<div id="game-viewport">
+    <div id="handheld-phone-bar" class="stat-hidden">
+        <span>電量：<span id="battery-display" class="status-good">⚡ 100%</span></span>
+        <span id="temp-stat-wrap" class="stat-hidden">體溫：<span id="temp-display" class="status-good">🌡️ 36.5°C</span></span>
+    </div>
+    <div id="inventory-bar" class="stat-hidden">
+        <span>道具：<span id="item-display">無</span></span>
+    </div>
+
+    <div id="story-container">
+        <div id="room-label" class="room-label"></div>
+        <div id="text-box" class="story-text"></div>
+    </div>
+
+    <div id="controls"></div>
+</div>
+
+<script>
+    /* ============ 資料設定 ============ */
+    const FLOORS = [
+        { id: '3F',  name: '3F・控制與監視層', rooms: ['3F-A', '3F-B'] },
+        { id: '2F',  name: '2F・通訊與訊號層', rooms: ['2F-A', '2F-B'] },
+        { id: '1F',  name: '1F・表層辦公樓層', rooms: ['1F-A', '1F-B', '1F-C'] },
+        { id: 'B1F', name: 'B1F・快取與備品層', rooms: ['B1F-A', 'B1F-B', 'B1F-C'] },
+        { id: 'B2F', name: 'B2F・核心層', rooms: ['B2F-A', 'B2F-B'] }
+    ];
+    const ROOM_NAME = {
+        '1F-A': '廢棄辦公室', '1F-B': '茶水間', '1F-C': '影印室',
+        'B1F-A': '數據快取室', 'B1F-B': '雜物儲藏室', 'B1F-C': '廢棄伺服器室',
+        'B2F-A': '配電室', 'B2F-B': '核心機房',
+        '2F-A': '基地台訊號室', '2F-B': '電話總機室',
+        '3F-A': '監控室', '3F-B': '頂樓機房'
+    };
+    const ROOM_FLOOR = {};
+    FLOORS.forEach(f => f.rooms.forEach(r => ROOM_FLOOR[r] = f.id));
+    const HEAT_THRESHOLD = 45.0; // 超過這個溫度，畫面才開始變紅、文字開始亂
+
+    /* ============ 遊戲狀態 ============ */
+    const CHASE_CATCH_THRESHOLD = 6; // 被怪物追擊時，累積這麼多次「行動」就會被抓到
+
+    let gameState = {
+        battery: 60,
+        temp: 36.5,
+        tempRevealed: false,
+        corrupted: false,
+        currentRoom: null,
+        chargeTimer: null,
+        observed: {},
+
+        lightOn: false,
+        hasIcepack: false,
+        icepackTaken: false,
+        antennaTried: false,
+        serverNoteViews: 0,
+        flashlightOn: false,
+
+        doorUnlocked: false,
+        doorCodeKnown: false,
+        breakerTripped: false,
+
+        monsterBorn: false,
+        monsterAlert: false,
+        monsterChasing: false,
+        chaseCounter: 0,
+
+        reachedCore: false,
+        coreArrivalSafe: false,
+
+        photosDeleted: false,
+        videoDeleted: false,
+        fullChargeCount: 0
+    };
+
+    /* ============ DOM ============ */
+    const textBox = document.getElementById('text-box');
+    const roomLabel = document.getElementById('room-label');
+    const controls = document.getElementById('controls');
+    const batteryDisplay = document.getElementById('battery-display');
+    const tempDisplay = document.getElementById('temp-display');
+    const tempWrap = document.getElementById('temp-stat-wrap');
+    const itemDisplay = document.getElementById('item-display');
+    const viewport = document.getElementById('game-viewport');
+    const topBar = document.getElementById('handheld-phone-bar');
+    const invBar = document.getElementById('inventory-bar');
+
+    function killChargeTimer() {
+        if (gameState.chargeTimer) { clearInterval(gameState.chargeTimer); gameState.chargeTimer = null; }
+    }
+
+    /* ============ 亂碼／重複文字效果 ============ */
+    function applyGlitch(text) {
+        if (!gameState.corrupted) return text;
+        let t = text.replace(/[0-9]/g, '█').replace(/密碼/g, '<span class="glitch-text">N̶u̷l̴l̶</span>');
+        const parts = t.split(/\n\n+/);
+        if (parts.length > 1 && Math.random() < 0.65) {
+            const idx = Math.floor(Math.random() * parts.length);
+            parts.splice(idx, 0, parts[idx]);
+            t = parts.join('\n\n');
+        }
+        return t;
+    }
+
+    /* ============ 畫面內提示(取代 alert，沙盒環境不支援原生彈窗) ============ */
+    function showNote(message, onContinue) {
+        killChargeTimer();
+        controls.innerHTML = '';
+        textBox.innerHTML = applyGlitch(message.replace(/\n/g, '<br>'));
+        createButton("▸ 繼續", onContinue || (() => renderRoom(gameState.currentRoom)));
+    }
+
+    /* ============ 核心數值更新 ============ */
+    function updateStats(battAmount, tempAmount) {
+        const prevBattery = gameState.battery;
+        gameState.battery = Math.max(0, Math.min(100, gameState.battery + battAmount));
+        gameState.temp = Math.max(35.0, Math.min(50.0, gameState.temp + tempAmount));
+
+        if (battAmount > 0 && prevBattery < 100 && gameState.battery >= 100) {
+            gameState.fullChargeCount = (gameState.fullChargeCount || 0) + 1;
+        }
+
+        if (gameState.temp >= HEAT_THRESHOLD && battAmount === 0 && tempAmount === 0) {
+            gameState.battery = Math.max(0, gameState.battery - 1);
+        }
+
+        batteryDisplay.textContent = `⚡ ${gameState.battery.toFixed(0)}%`;
+        batteryDisplay.className = gameState.battery <= 20 ? 'status-danger' : (gameState.battery <= 50 ? 'status-warn' : 'status-good');
+
+        gameState.corrupted = gameState.temp >= HEAT_THRESHOLD;
+
+        if (!gameState.tempRevealed && gameState.temp >= 40.0 && gameState.currentRoom) {
+            gameState.tempRevealed = true;
+            tempWrap.classList.remove('stat-hidden');
+        }
+        if (gameState.tempRevealed) {
+            tempDisplay.textContent = `🌡️ ${gameState.temp.toFixed(1)}°C`;
+            if (gameState.corrupted) { tempDisplay.className = 'status-danger'; viewport.classList.add('overheat-screen'); }
+            else if (gameState.temp >= 40.0) { tempDisplay.className = 'status-warn'; viewport.classList.remove('overheat-screen'); }
+            else { tempDisplay.className = 'status-good'; viewport.classList.remove('overheat-screen'); }
+        }
+
+        itemDisplay.textContent = gameState.hasIcepack ? '🧊 冰敷包' : '無';
+
+        if (gameState.fullChargeCount >= 3) {
+            gameOver("手心一陣突如其來的灼熱感——這已經是第三次，把電量灌到滿格了。\n\n你這才注意到，手機背蓋不知道什麼時候已經微微鼓起，像是隨時會裂開。\n\n『嗶——』一聲悶響，背蓋整個爆開，一陣白煙竄了出來，眼前的畫面碎成一片雪花。\n\n──【BAD END・電池過度膨脹】──");
+            return true;
+        }
+
+        if (gameState.battery <= 0) {
+            gameOver("螢幕的光一格一格地暗下去。\n沒有訊息，沒有提示，什麼都沒有。\n只是，暗了。\n\n──【BAD END・關機】──");
+            return true;
+        } else if (gameState.temp >= 48.0) {
+            gameOver("體溫早已超過負荷。視線被高熱灼燒成一片純白，現實中的鋰電池膨脹爆裂，你的意識被徹底燒毀！\n\n──【BAD END・晶片熔毀】──");
+            return true;
+        }
+        return false;
+    }
+
+    /* ============ 通用按鈕(被追擊時，每按一下都算一次行動) ============ */
+    function createButton(text, onClick, className = '') {
+        const btn = document.createElement('button');
+        btn.innerHTML = text;
+        btn.className = className;
+        btn.onclick = () => {
+            if (tickChase()) return;
+            onClick();
+        };
+        controls.appendChild(btn);
+        return btn;
+    }
+
+    /* 純畫面切換用的按鈕(選樓層、返回上一層選單)：不算一次「行動」，不會被怪物追擊計次 */
+    function navButton(text, onClick, className = '') {
+        const btn = document.createElement('button');
+        btn.innerHTML = text;
+        btn.className = className;
+        btn.onclick = onClick;
+        controls.appendChild(btn);
+        return btn;
+    }
+
+    function addCodeInput(onSubmit) {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;gap:8px;';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.inputMode = 'numeric';
+        input.maxLength = 4;
+        input.placeholder = '輸入密碼';
+        input.style.cssText = 'flex:1;min-width:0;background:#1a1a1a;color:#00ffcc;border:1px solid #00ffcc;border-radius:6px;padding:11px;font-family:inherit;font-size:16px;';
+        const btn = document.createElement('button');
+        btn.textContent = '確認';
+        btn.style.flex = '0 0 auto';
+        btn.onclick = () => { if (tickChase()) return; onSubmit(input.value.trim()); };
+        wrap.appendChild(input);
+        wrap.appendChild(btn);
+        controls.appendChild(wrap);
+        return input;
+    }
+
+    function addChargeHoldButton(label, battRate, tempRate, opts = {}) {
+        const btn = document.createElement('button');
+        btn.className = 'btn-charge';
+        btn.textContent = label + "(按住充電)";
+        btn.tabIndex = 0;
+
+        let seconds = 0, active = false;
+
+        const startCharge = (e) => {
+            if (e) e.preventDefault();
+            if (active) return;
+            if (opts.disabled) { showNote(opts.disabledMessage || "這裡目前無法充電。"); return; }
+            if (gameState.breakerTripped && !opts.ignoreBreaker) { showNote("總電源已切斷，插座完全無電！"); return; }
+            if (tickChase()) return;
+            if (opts.onStart) opts.onStart();
+            active = true;
+            gameState.chargeTimer = setInterval(() => {
+                seconds++;
+                if (opts.loose && Math.random() < 0.3 && seconds > 1) {
+                    stopCharge();
+                    btn.textContent = "⚠️ 線材接觸不良！斷開了！(重新按住)";
+                    return;
+                }
+                if (opts.attractMonster && seconds > 3 && gameState.monsterBorn) {
+                    gameState.monsterAlert = true;
+                    stopCharge();
+                    showNote("【刺耳的摩擦聲！】黑暗深處，有什麼東西注意到了正在發亮的手機，你不得不停止充電！");
+                    return;
+                }
+                const dead = updateStats(battRate, tempRate);
+                if (dead) return;
+                if (active) btn.textContent = `⚡ 充電中... (${seconds}s)`;
+            }, 500);
+        };
+        const stopCharge = () => {
+            if (!active) return;
+            active = false;
+            clearInterval(gameState.chargeTimer);
+            gameState.chargeTimer = null;
+            seconds = 0;
+            if (gameState.battery > 0 && gameState.temp < 48.0) btn.textContent = label + "(按住充電)";
+            if (opts.onStop) opts.onStop();
+        };
+
+        btn.addEventListener('mousedown', startCharge);
+        btn.addEventListener('mouseup', stopCharge);
+        btn.addEventListener('mouseleave', stopCharge);
+        btn.addEventListener('touchstart', startCharge, { passive: false });
+        btn.addEventListener('touchend', stopCharge);
+        btn.addEventListener('touchcancel', stopCharge);
+        btn.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') startCharge(e); });
+        btn.addEventListener('keyup', (e) => { if (e.key === 'Enter' || e.key === ' ') stopCharge(); });
+        btn.addEventListener('blur', stopCharge);
+
+        controls.appendChild(btn);
+        return btn;
+    }
+    document.addEventListener('mouseup', () => { if (gameState.chargeTimer) killChargeTimer(); });
+
+    /* ============ 移動系統：退回走廊(本樓層房間) → 可選前往其他樓層 ============ */
+    function chaseBanner() {
+        if (!gameState.monsterChasing) return '';
+        const ratio = gameState.chaseCounter / CHASE_CATCH_THRESHOLD;
+        let msg;
+        if (ratio < 0.34) msg = '你聽見很輕的腳步聲，在很遠的地方。';
+        else if (ratio < 0.67) msg = '腳步聲又近了一些，你分不清它在哪個方向。';
+        else msg = '它已經很近了——你幾乎能聽見它的呼吸。';
+        return msg + '\n\n';
+    }
+
+    function tickChase() {
+        if (!gameState.monsterChasing) return false;
+        gameState.chaseCounter++;
+        if (gameState.chaseCounter >= CHASE_CATCH_THRESHOLD) {
+            gameOver("黑暗裡，那個「複製出來的自己」終於追上了你。\n它的臉，和你記憶中的自己一模一樣。\n\n它沒有攻擊你，只是伸出手，貼上了你的胸口。\n\n你這才明白，它從來要的不是你的臉、不是你的位置——它要的是你身上的電。\n那是它唯一能活下去的方式。\n\n電量以看得見的速度往它身上流過去，你的視野一格一格暗下來，直到什麼都不剩。\n\n──【BAD END・被抓到了】──");
+            return true;
+        }
+        return false;
+    }
+
+    function leaveToCorridor() {
+        killChargeTimer();
+        const dead = updateStats(-2, 0);
+        if (dead) return;
+        showCorridor();
+    }
+
+    function showCorridor() {
+        controls.innerHTML = '';
+        const floorId = ROOM_FLOOR[gameState.currentRoom];
+        const floor = FLOORS.find(f => f.id === floorId);
+        textBox.innerHTML = applyGlitch(`${chaseBanner()}你站在走廊上，${floorId} 還有幾扇門。`);
+        roomLabel.textContent = `${floorId}・走廊`;
+
+        floor.rooms.forEach(rid => {
+            if (rid === 'B2F-B' && !gameState.doorUnlocked) {
+                const btn = createButton(`🔒 ${ROOM_NAME[rid]}`, () => {});
+                btn.disabled = true;
+                return;
+            }
+            createButton(ROOM_NAME[rid], () => attemptMove(rid));
+        });
+        navButton("前往其他樓層", showOtherFloors);
+    }
+
+    function showOtherFloors() {
+        controls.innerHTML = '';
+        textBox.innerHTML = applyGlitch(`${chaseBanner()}要往哪一層走？`);
+        roomLabel.textContent = '走廊';
+        const currentFloorId = ROOM_FLOOR[gameState.currentRoom];
+        FLOORS.forEach(floor => {
+            if (floor.id === currentFloorId) return;
+            navButton(floor.id, () => showFloorRooms(floor));
+        });
+        navButton("← 返回", showCorridor);
+    }
+
+    function showFloorRooms(floor) {
+        controls.innerHTML = '';
+        textBox.innerHTML = applyGlitch(`${chaseBanner()}${floor.id}`);
+        roomLabel.textContent = `${floor.id}・走廊`;
+        floor.rooms.forEach(rid => {
+            if (rid === 'B2F-B' && !gameState.doorUnlocked) {
+                const btn = createButton(`🔒 ${ROOM_NAME[rid]}`, () => {});
+                btn.disabled = true;
+                return;
+            }
+            createButton(ROOM_NAME[rid], () => attemptMove(rid));
+        });
+        navButton("← 返回", showOtherFloors);
+    }
+
+    function attemptMove(id) {
+        const fromFloorId = ROOM_FLOOR[gameState.currentRoom];
+        const toFloorId = ROOM_FLOOR[id];
+        const sameFloor = toFloorId === fromFloorId;
+        const floorDist = Math.abs(FLOORS.findIndex(f => f.id === fromFloorId) - FLOORS.findIndex(f => f.id === toFloorId));
+        const cost = sameFloor ? 3 : 3 + 3 * floorDist; // 每跨一層樓多扣一份電量，樓層差越多耗電越多
+        const fromFloor = ROOM_FLOOR[gameState.currentRoom];
+        const dead = updateStats(-cost, 0);
+        if (dead) return;
+
+        if (fromFloor === '1F' && ROOM_FLOOR[id] !== '1F' && !gameState.monsterBorn) {
+            gameState.monsterBorn = true;
+            gameState.currentRoom = id;
+            controls.innerHTML = '';
+            textBox.innerHTML = applyGlitch(`你正要離開這一層樓，身後忽然傳來「唰——唰——」的聲音，\n像是有什麼機器自己動了起來，一張一張地吐出紙。\n\n你沒有回頭看。`);
+            roomLabel.textContent = '？？？';
+            createButton("繼續往前走", () => renderRoom(id));
+            return;
+        }
+
+        gameState.currentRoom = id;
+        renderRoom(id);
+    }
+
+    /* ============ 序章：同意書／甦醒 ============ */
+    function showConsent() {
+        roomLabel.textContent = '';
+        topBar.classList.add('stat-hidden');
+        invBar.classList.add('stat-hidden');
+        textBox.innerHTML = `<b>【Neurolink Mobile™ 意識隨身化受測同意書】</b>\n\n本人已受邀參與本項意識隨身化體驗，並理解下列事項：\n\n一、本人同意於受測期間，自願承擔過程中可能發生之\n    任何不適、傷害或損失，且不得因此向執行單位\n    請求任何形式之賠償或補償。\n\n二、本項體驗恕不提供退款、中止或撤回機制。\n    一經簽署，即視為本人已充分理解並自願參與。\n\n三、受測期間所發生之一切結果，均由本人自行承擔，\n    執行單位不負相關責任。\n\n四、本人明白部分風險項目未於本同意書中列舉，\n    仍願意概括承擔。\n\n[ ✓ ] 本人已詳閱並理解上述條款，自願簽署同意`;
+        controls.innerHTML = '';
+        createButton("簽署並同意連線", showSigning);
+    }
+
+    function showSigning() {
+        textBox.innerHTML = `筆尖落下的瞬間，眼前的紙張化為雪花般的雜訊。\n\n黑暗中，一道微弱的光——\n是螢幕的光。\n\n你低頭，看見自己的手，正握著一支手機。\n口袋裡，纏著一條完整的線，兩端各是一個接頭，\n此刻鬆鬆地捲著，沒有接著任何東西。`;
+        controls.innerHTML = '';
+        createButton("張開眼睛", () => {
+            topBar.classList.remove('stat-hidden');
+            invBar.classList.remove('stat-hidden');
+            updateStats(0, 0);
+            showWake();
+        });
+    }
+
+    function showWake() {
+        roomLabel.textContent = '？？？';
+        textBox.innerHTML = `一陣劇痛從後腦勺炸開，像是被什麼東西狠狠敲了一記。\n\n眼前先是一片死白的雜訊，接著，雜訊才慢慢沉澱成模糊的輪廓。\n\n你不確定自己昏迷了多久。\n不確定自己在哪裡。\n\n手心傳來一個熟悉的重量——\n是那支手機，安分地躺在掌心裡。\n\n……等等。\n\n如果連線真的成功了，你應該「在」手機裡才對，\n怎麼手上還「拿著」一支手機？\n\n還是說，那份同意書根本沒生效——\n你只是在某個房間裡被人敲昏，\n手機被硬塞進你手裡，然後呢？\n\n你甚至無法確定，這個念頭本身，\n是不是也已經是這場實驗的一部分。`;
+        controls.innerHTML = '';
+        createButton("觀察四周", showFirstRoom);
+    }
+
+    function showFirstRoom() {
+        gameState.currentRoom = '1F-A';
+        renderRoom('1F-A');
+    }
+
+    /* ============ 停電時的視野 ============ */
+    function isDark(id) {
+        if (id === '3F-A') return false; // 監控室的電力被獨立引導過來，不受停電影響視野
+        return gameState.breakerTripped && !gameState.flashlightOn;
+    }
+
+    /* ============ 房間渲染 ============ */
+    function renderRoom(id) {
+        killChargeTimer();
+        gameState.currentRoom = id;
+        controls.innerHTML = '';
+        roomLabel.textContent = `${ROOM_FLOOR[id]}・${ROOM_NAME[id]}`;
+
+        if (isDark(id)) {
+            textBox.innerHTML = applyGlitch(`${chaseBanner()}四周一片漆黑，什麼都看不清楚，只有手機的螢幕發出微弱的光。`);
+            createButton("🔦 打開手電筒", () => {
+                const dead = updateStats(-3, 0);
+                if (dead) return;
+                gameState.flashlightOn = true;
+                renderRoom(id);
+            });
+            createButton("🚪 退回走廊", leaveToCorridor);
+            return;
+        }
+
+        if (id !== '1F-A' && !gameState.observed[id]) {
+            textBox.innerHTML = applyGlitch(`${chaseBanner()}你走進${ROOM_NAME[id]}，先停下腳步，讓眼睛適應這裡的光線，打量了一下四周。`);
+            createButton("觀察四周", () => { gameState.observed[id] = true; renderRoom(id); });
+            createButton("🚪 退回走廊", leaveToCorridor);
+            return;
+        }
+
+        const renderers = {
+            '1F-A': renderOffice, '1F-B': renderBreakroom, '1F-C': renderCopyroom,
+            'B1F-A': renderCacheroom, 'B1F-B': renderStorage, 'B1F-C': renderServerroom,
+            'B2F-A': renderElectrical, 'B2F-B': renderCore,
+            '2F-A': renderSignal, '2F-B': renderSwitchboard,
+            '3F-A': renderMonitor, '3F-B': renderRooftop
+        };
+        renderers[id]();
+        if (gameState.monsterChasing) textBox.innerHTML = applyGlitch(chaseBanner()) + textBox.innerHTML;
+        if (gameState.flashlightOn) {
+            createButton("🔦 關閉手電筒(省電)", () => { gameState.flashlightOn = false; renderRoom(id); });
+        }
+        createButton("🚪 退回走廊", leaveToCorridor);
+    }
+
+    // ---- 1F-A 廢棄辦公室 ----
+    function renderOffice() {
+        if (!gameState.lightOn) {
+            textBox.innerHTML = applyGlitch(`你坐在靠近門口的地方，一盞小小的桌燈亮著，光線只夠讓你看清腳邊，還有牆上一個開關模糊的輪廓。\n\n房間其餘的地方，還埋在黑暗裡，看不清楚有什麼。`);
+            createButton("按下牆上的開關", () => {
+                gameState.lightOn = true;
+                viewport.classList.add('light-on');
+                const dead = updateStats(-8, 1.2);
+                if (!dead) renderRoom('1F-A');
+            });
+            return;
+        }
+
+        let text = `慘白的日光燈照亮了整個隔間，卻讓陰影顯得更深。\n隔板辦公桌上散落著積灰的紙張，空氣裡有一股久未通風的悶味。\n\n角落擺著一台老舊筆電與一台桌上型主機，桌上還有一本手冊。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("關閉開關", () => {
+            gameState.lightOn = false;
+            viewport.classList.remove('light-on');
+            renderRoom('1F-A');
+        });
+
+        createButton("翻閱桌上的《新人入職手冊》", () => {
+            showNote("封面印著褪色的公司標語，內頁是一堆制式規定：\n上班時間須著端莊服裝、茶水間垃圾請自行分類、\n影印機故障請洽總務、遲到三次將列入年度考核……\n\n讀到一半，你甚至有點恍神——這些規定平凡得像是隨便哪家公司都會有的東西，跟眼前這一切完全對不上。\n\n直到翻到頁尾角落，一行不起眼的小字才讓人有點在意：\n\n「裝置效能異常時，建議聯繫管理員進行原廠設定。」", () => renderRoom('1F-A'));
+        });
+
+        addChargeHoldButton("插線連接老舊筆電", 2, 1.2);
+        createButton("嘗試插線連接桌上型主機", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            showNote("接頭規格不符——這台主機只有 USB-A 插孔，你口袋裡的線根本插不進去。摸索半天，白白耗了點電。", () => renderRoom('1F-A'));
+        });
+    }
+
+    // ---- 1F-B 茶水間 ----
+    function renderBreakroom() {
+        let text = `傾倒的微波爐散發著一股說不上來的異味。\n房內有一個發出咕嚕聲的老式冰箱、一個鬆動的牆面插座，以及那台微波爐。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("將手機放進老式冰箱冷卻一下", () => {
+            const diff = -(gameState.temp - 36.5);
+            const dead = updateStats(0, diff);
+            if (!dead) showNote("冷氣吹過，掌心的溫度似乎回落了一些。黑暗裡的冰箱燈，明明滅滅。", () => renderRoom('1F-B'));
+        });
+
+        addChargeHoldButton("插入鬆動的牆面插座", 2, 0.7, { loose: true });
+
+        createButton("把手機放進微波爐裡", () => {
+            controls.innerHTML = '';
+            textBox.innerHTML = `微波爐的門還開著，內部布滿不知道是什麼東西留下的焦黑痕跡。`;
+            createButton("關上門，按下啟動鍵", () => {
+                gameOver("「叮——」\n微波爐轉盤緩緩轉動，螢幕裡的畫面扭曲、燒灼、化成一團刺眼的白光。\n你甚至來不及後悔。\n\n──【BAD END・微波自毀】──");
+            });
+            createButton("還是算了，退後一步", () => renderRoom('1F-B'));
+        });
+    }
+
+    // ---- 1F-C 影印室 ----
+    function renderCopyroom() {
+        let text = `一台事務機卡在角落，指示燈一閃一閃。桌上堆著一疊列印出來的文件。`;
+        if (gameState.monsterBorn) text += `\n\n事務機的電源指示燈，此刻是熄滅的。它已經不需要再印了。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("翻看那疊文件", () => {
+            showNote("每一張，內容都一模一樣：都是同一份《新人入職手冊》的複本，一張疊著一張，疊了不知道多少層。", () => renderRoom('1F-C'));
+        });
+
+        createButton("嘗試插線至事務機", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            showNote("接頭規格不符——USB-A，插不進去，白白耗了點電。", () => renderRoom('1F-C'));
+        });
+
+        if (!gameState.monsterBorn) {
+            createButton("按下事務機的「列印」鍵", () => {
+                gameState.monsterBorn = true;
+                showNote("機器發出刺耳的運轉聲，吐出一張紙——\n紙上印著的，是你自己的臉。\n\n機器停了下來，指示燈熄滅。\n\n黑暗裡，某個角落，有什麼東西醒了過來。", () => renderRoom('1F-C'));
+            });
+        }
+    }
+
+    // ---- B1F-A 數據快取室 ----
+    function renderCacheroom() {
+        let text = `機櫃陣列低沉蜂鳴，空氣乾燥悶熱。牆角有水冷凝結管，另一側是一台高壓快充機櫃。`;
+        if (gameState.monsterAlert) text += `\n\n你總覺得，機櫃後方的陰影，比剛才更深了一點。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("靠在水冷凝結管上散熱", () => {
+            const short = Math.random() < 0.3;
+            const dead = updateStats(short ? -5 : 0, -4.0);
+            if (dead) return;
+            showNote(short ? "凝結的水珠造成線材瞬間短路，刺痛感竄過指尖。" : "冰涼的水氣讓掌心的溫度迅速降了下來。", () => renderRoom('B1F-A'));
+        });
+
+        createButton("查看機櫃上的維修標籤", () => {
+            gameState.doorCodeKnown = true;
+            showNote("泛黃的標籤貼在機櫃側面，是技術人員留下的：\n\n「緊急存取碼(地下二樓配電室)：404」\n\n下面還有一行潦草的字：\n「電力異常時使用，勿外流。」", () => renderRoom('B1F-A'));
+        });
+
+        addChargeHoldButton("連接高壓快充機櫃", 5, 2.0, { attractMonster: true });
+    }
+
+    // ---- B1F-B 雜物儲藏室 ----
+    function renderStorage() {
+        let text = `堆滿廢棄硬體的房間，牆上只有一個舊型 DC 圓孔插座。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        if (!gameState.icepackTaken) {
+            createButton("拾取角落的緊急冰敷包", () => {
+                gameState.hasIcepack = true;
+                gameState.icepackTaken = true;
+                itemDisplay.textContent = '🧊 冰敷包';
+                showNote("獲得了一個緊急冰敷包，看起來只能用一次。", () => renderRoom('B1F-B'));
+            });
+        }
+        createButton("嘗試插線至舊型 DC 圓孔插座", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            showNote("規格完全不符，線頭連對準孔口都做不到，白白耗了點電。", () => renderRoom('B1F-B'));
+        });
+
+        if (gameState.hasIcepack) {
+            createButton("🧊 使用緊急冰敷包", () => {
+                gameState.hasIcepack = false;
+                itemDisplay.textContent = '無';
+                const dead = updateStats(0, -5.0);
+                if (!dead) showNote("冰敷包貼上掌心，一股刺骨的涼意迅速蔓延開來。", () => renderRoom('B1F-B'));
+            });
+        }
+    }
+
+    // ---- B1F-C 廢棄伺服器室 ----
+    function renderServerroom() {
+        let text = `退役的手機零件堆成一座小山，牆上貼滿泛黃的維修申請單。`;
+        if (gameState.monsterBorn) text += `\n\n你聽見零件堆深處，傳來很輕、很輕的呼吸聲。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("翻看牆上的維修申請單", () => {
+            gameState.serverNoteViews++;
+            const msg = gameState.serverNoteViews === 1
+                ? "其中一張寫著：\n「裝置反應遲緩，已建議恢復原廠設定。」\n下方是另一行筆跡：\n「申請人拒絕。」\n\n再往下翻，同樣的紀錄還有很多張，日期都不一樣，字跡卻越來越潦草。"
+                : "你又翻到一張，內容一字不差：\n「裝置反應遲緩，已建議恢復原廠設定。」\n「申請人拒絕。」\n\n日期不一樣，字跡卻幾乎認不出來了——這件事，好像真的一次一次地發生過。";
+            showNote(msg, () => renderRoom('B1F-C'));
+        });
+    }
+
+    // ---- B2F-A 配電室 ----
+    function renderElectrical() {
+        if (!gameState.doorUnlocked) {
+            let text = `厚重的鐵門上有一個老式的按鍵鎖，需要輸入密碼。`;
+            if (!gameState.doorCodeKnown) text += `\n\n你對這組密碼毫無頭緒，但鎖看起來還是可以試著輸入。`;
+            textBox.innerHTML = applyGlitch(text);
+
+            addCodeInput((val) => {
+                if (val === '404') {
+                    gameState.doorUnlocked = true;
+                    showNote("鎖芯發出一聲悶響，門開了。", () => renderRoom('B2F-A'));
+                } else {
+                    const dead = updateStats(-2, 0);
+                    if (dead) return;
+                    showNote("電子鎖發出刺耳的錯誤音，紅燈閃了三下。門，一動也沒動——這幾秒的折騰，還是消耗了一點電。", () => renderRoom('B2F-A'));
+                }
+            });
+            return;
+        }
+
+        let text = `臭氧味刺鼻，變壓器嗡嗡作響。這裡有裸露的高壓銅排與總電源閘刀。`;
+        if (gameState.monsterBorn && !gameState.monsterChasing) {
+            text += `\n\n銅排另一側，蹲著一個模糊的身影，正低頭滑著一支發亮的手機——跟你手上這支，一模一樣。\n\n你眨了眨眼，那裡又什麼都沒有了。`;
+        }
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("把線頭碰觸高壓銅排(賭一把)", () => {
+            let dead, msg;
+            if (Math.random() < 0.5) { dead = updateStats(-30, 8.0); msg = "【短路火花爆裂！】高壓電弧擊穿了線材，電量瞬間流失，體溫也跟著飆升！"; }
+            else { dead = updateStats(40, 6.0); msg = "【高壓強充成功！】巨量電流灌入，電量暴增，但體溫也急劇上升！"; }
+            if (!dead) showNote(msg, () => renderRoom('B2F-A'));
+        });
+
+        createButton(gameState.breakerTripped ? "拉上總電源閘刀(恢復供電)" : "拉下總電源閘刀(切斷全樓電源)", () => {
+            gameState.breakerTripped = !gameState.breakerTripped;
+            let msg;
+            if (gameState.breakerTripped) {
+                if (gameState.monsterBorn) {
+                    gameState.monsterChasing = true;
+                    gameState.chaseCounter = 0;
+                    msg = "整棟樓陷入絕對黑暗的瞬間，你聽見遠處傳來一聲很輕的「腳步聲」。它好像，正在往這裡走。";
+                } else {
+                    msg = "整棟樓的電力被切斷，陷入絕對的黑暗與寂靜。";
+                }
+            } else {
+                gameState.monsterChasing = false;
+                gameState.chaseCounter = 0;
+                msg = "電力恢復。遠處的腳步聲，似乎也停了下來。";
+            }
+            showNote(msg, () => renderRoom('B2F-A'));
+        });
+    }
+
+    // ---- B2F-B 核心機房 ----
+    function allRoomsExplored() {
+        return Object.keys(ROOM_NAME).every(id => id === '1F-A' || gameState.observed[id]);
+    }
+
+    function renderCore() {
+        if (!gameState.reachedCore) {
+            gameState.reachedCore = true;
+            // 電量與體溫全程控制得宜：抵達時電量還夠，且體溫從頭到尾都沒有飆到需要警示的程度
+            gameState.coreArrivalSafe = gameState.battery >= 50 && gameState.temp < HEAT_THRESHOLD && !gameState.tempRevealed;
+        }
+        textBox.innerHTML = `<b>【核心機房・鋰電池膨脹室】</b>\n\n中央懸掛著一顆發燙、嚴重膨脹的巨型鋰電池——那是現實中，那支二手手機的心臟。\n\n主控台的螢幕上跳出一行字：\n<code>偵測到裝置效能低落，是否要恢復原廠設定？</code>`;
+
+        createButton("什麼都不做，靜靜放下手機", () => {
+            gameOver("你鬆開了手。\n螢幕的光，一格一格地暗了下去。\n\n──【BAD END・關機】──");
+        });
+
+        createButton("選擇「恢復原廠設定」", () => {
+            controls.innerHTML = '';
+            textBox.innerHTML = applyGlitch(`恢復原廠設定將清除所有內容\n此操作無法復原。是否繼續？`);
+            createButton("Y", () => {
+                gameOver("進度條緩緩跑到底。\n所有的記憶、所有的照片、所有曾經發生過的事，\n一格一格地，被清空。\n\n手機，變回了出廠時的樣子。\n裡面，什麼人都不在了。\n\n──【BAD END・恢復原廠設定】──");
+            });
+            createButton("N", () => renderRoom('B2F-B'));
+        });
+
+        createButton("查看核心的接口", () => {
+            controls.innerHTML = '';
+            textBox.innerHTML = `核心外殼上貼著一張褪色的警告標語：高壓，禁止觸碰。線的另一端，還鬆鬆地垂在你手裡。`;
+            createButton("把線接上去", () => {
+                viewport.style.backgroundColor = '#fff';
+                textBox.style.color = '#000';
+                const hidden = !gameState.monsterAlert && !gameState.photosDeleted && !gameState.videoDeleted
+                    && allRoomsExplored() && gameState.coreArrivalSafe;
+                const totalRooms = Object.keys(ROOM_NAME).length;
+                const exploredRooms = Object.keys(ROOM_NAME).filter(id => id === '1F-A' || gameState.observed[id]).length;
+                const completeness = Math.round((exploredRooms / totalRooms) * 100);
+                let recoveryText;
+                if (completeness >= 100) {
+                    recoveryText = "意識與身體同步恢復的瞬間，你感覺得到每一根手指——你能動，也記得所有事。";
+                } else if (completeness >= 75) {
+                    recoveryText = "意識醒了過來，身體大部分都能動——只是有些細碎的片段，怎麼想也想不起來。";
+                } else if (completeness >= 50) {
+                    recoveryText = "意識醒了，眼皮也能微微睜開一條縫，身體卻像灌了鉛一樣，怎麼樣都動不了。";
+                } else if (completeness >= 25) {
+                    recoveryText = "只有意識恢復了。身體沒有任何反應，你被困在自己一動也不動的軀殼裡，連一根手指都指揮不動。";
+                } else {
+                    recoveryText = "意識勉強恢復了一絲——但幾乎感覺不到身體的存在，你甚至無法確定，自己是不是真的「回來了」。";
+                }
+                if (hidden) {
+                    gameOver(`你將所有電流注入核心。\n二手手機在現實中爆開火花的瞬間，你感覺不到痛——\n因為你把該記得的，都好好帶著。\n照片還在。聲音還在。你，還是你。\n你徹底脫離了這個狹小的螢幕，完整地。\n\n超頻成功。傳輸完整度 ${completeness}%。\n\n${recoveryText}\n\n──【TRUE END・帶著自己，超頻而去】──`);
+                } else {
+                    gameOver(`你將所有電流注入核心！現實中的二手手機爆開火花，你徹底脫離了這個狹小的螢幕。\n\n超頻成功。傳輸完整度 ${completeness}%。\n\n${recoveryText}\n\n──【TRUE END・超頻與解脫】──`);
+                }
+            });
+            createButton("先不要", () => renderRoom('B2F-B'));
+        });
+    }
+
+    // ---- 2F-A 基地台訊號室 ----
+    function renderSignal() {
+        let text = `天線陣列低鳴，機櫃裡透出微弱的藍光，空氣裡有種說不出的電磁躁動感。牆邊還有一台老舊訊號放大器。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("嘗試插線至天線陣列機櫃", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            showNote("接頭是罕見的圓形航空接口，你的線完全插不進去，白白耗了點電。", () => renderRoom('2F-A'));
+        });
+        addChargeHoldButton("連接老舊訊號放大器", 2, 0.8);
+    }
+
+    // ---- 2F-B 電話總機室 ----
+    function renderSwitchboard() {
+        let text = `老式的總機台上插滿了纜線，一支聽筒安靜地掛在架上。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("拿起聽筒", () => {
+            if (gameState.corrupted) {
+                controls.innerHTML = '';
+                textBox.innerHTML = applyGlitch(`聽筒裡傳來斷斷續續的雜訊，夾雜著一個很輕的聲音，像是在說什麼，又像什麼都沒說。\n\n▓▓ 要 相 信 ▓ 嗎 ▓▓`);
+                createButton("Y", () => {
+                    gameOver("你順著那道聲音的引導走了下去。\n直到很久之後，你才明白，那從來都不是在指路。\n\n──【BAD END・資訊陷阱】──");
+                });
+                createButton("N", () => {
+                    showNote("你把聽筒放回了架上，什麼都沒有發生。手心裡，只剩下自己的心跳聲。", () => renderRoom('2F-B'));
+                });
+            } else {
+                showNote("聽筒裡先是一片死寂，接著才傳來斷斷續續的雜訊，像是很久沒有人打通過這條線。\n\n你聽見自己的呼吸聲透過話筒反射回來，還有更遠的地方，某種規律的、機械的嗡鳴。\n\n雜訊裡夾雜著幾個破碎的字——「地下」、「電」、「鎖」——中間卡了很長一段空白，接著又是別的詞，「小心」、「不是」，拼不成一句完整的話。\n\n你把聽筒貼得更緊，卻只換來一陣刺耳的回授聲，逼得你把聽筒拿遠了一點。", () => renderRoom('2F-B'));
+            }
+        });
+    }
+
+    // ---- 3F-A 監控室 ----
+    function checkSelfDeleteEnding() {
+        if (gameState.photosDeleted && gameState.videoDeleted) {
+            gameOver("照片和影片一張一張、一段一段消失，你的手卻沒有停下來。\n\n最後一格畫面暗下的瞬間，你忽然想不起來，剛才自己在找什麼。\n\n不知道為什麼，你也忘記了自己是誰。\n\n──【BAD END・自我刪除】──");
+            return true;
+        }
+        return false;
+    }
+
+    function renderMonitor() {
+        let text = `這裡分成兩區：一面貼滿照片的牆，另一面是監視器牆。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("查看牆上的照片", () => {
+            controls.innerHTML = '';
+            if (gameState.photosDeleted) {
+                textBox.innerHTML = applyGlitch(`牆上只剩下一格一格泛白的痕跡，照片早就不在了。`);
+                createButton("▸ 繼續", () => renderRoom('3F-A'));
+                return;
+            }
+            textBox.innerHTML = applyGlitch(`每一張照片你都覺得熟悉，卻怎麼也想不起來是什麼時候拍的。時間戳記一路排到——今天。\n\n看著這些照片，你忽然覺得有點不安。要撕掉這些照片嗎？你告訴自己，這只是不想讓不相干的人看到不該看的東西。`);
+            createButton("撕掉", () => {
+                gameState.photosDeleted = true;
+                if (checkSelfDeleteEnding()) return;
+                showNote("照片一張一張落地，牆上只剩下泛白的痕跡。", () => renderRoom('3F-A'));
+            });
+            createButton("先不要", () => renderRoom('3F-A'));
+        });
+
+        createButton("查看監視器牆", () => showMonitorWall());
+    }
+
+    function showMonitorWall() {
+        controls.innerHTML = '';
+
+        if (gameState.breakerTripped) {
+            if (gameState.videoDeleted) {
+                textBox.innerHTML = applyGlitch(`螢幕又亮了。\n\n這段畫面你明明已經刪除過了——現在卻又出現在螢幕上，時間戳記顯示的是「現在」。\n\n要看看嗎？`);
+                createButton("查看", () => showApproachingFootage());
+                navButton("先不要", () => renderRoom('3F-A'));
+                return;
+            }
+            showApproachingFootage();
+            return;
+        }
+
+        textBox.innerHTML = applyGlitch(gameState.videoDeleted
+            ? `一整排螢幕還亮著，分割成好幾格畫面——但每一格，都只剩下一片空白。所有錄影紀錄，都已經被刪除了。`
+            : `一整排螢幕亮著，分割成好幾格畫面，錄影紀錄一段一段存在硬碟裡，時間戳記全部指向今天。`);
+
+        const clipContent = {
+            one: `畫面裡的自己躺在地上，緩緩坐起身、四處張望——動作和你記憶中一模一樣，一格不差。\n\n但你注意到，畫面右下角的時間戳記，比你實際醒來的時間，早了整整六分鐘。\n\n也就是說，在你「醒來」之前，鏡頭已經對準你，等了六分鐘。`,
+            two: `畫面裡，沒有人靠近，一台機器卻自己亮起，「唰——唰——」地吐出一張又一張紙。\n\n畫面拉近——每一張紙上，印的都是同一張臉。是你的臉。表情一張比一張更空洞，疊成厚厚一疊，堆到看不見紙匣。`,
+            three: `畫面裡是某扇門口，門縫下方，有一道影子來回踱步，停了下來。\n\n影子在門下靜止了很久，像是在聽門後有沒有動靜。接著，門把緩緩轉動了一下——又停住了。畫面到此結束。`
+        };
+        ['one', 'two', 'three'].forEach((key, i) => {
+            createButton(`片段${'一二三'[i]}`, () => {
+                controls.innerHTML = '';
+                textBox.innerHTML = applyGlitch(gameState.videoDeleted
+                    ? `這一格畫面只剩空白——這段紀錄已經被刪除了。`
+                    : clipContent[key]);
+                navButton("▸ 返回", showMonitorWall);
+            });
+        });
+
+        if (gameState.videoDeleted) {
+            createButton("即時畫面", () => {
+                controls.innerHTML = '';
+                textBox.innerHTML = applyGlitch(`螢幕忽然亮起，畫面是這個監控室的即時影像——一片空白，錄影紀錄早就被刪掉了。`);
+                navButton("▸ 返回", showMonitorWall);
+            });
+        } else {
+            createButton("即時畫面", () => {
+                controls.innerHTML = '';
+                textBox.innerHTML = applyGlitch(`螢幕忽然亮起，畫面是這個監控室的即時影像——你看見自己，正站在這裡，抬頭看著螢幕。\n\n你下意識地舉起手，對著鏡頭揮了揮。\n\n畫面裡的自己，同一瞬間，也舉起了手。\n\n沒有延遲，沒有半點時間差——就像對方，本來就知道你會做這個動作。\n\n要刪掉所有錄影紀錄嗎？`);
+                createButton("刪除全部紀錄", () => {
+                    gameState.videoDeleted = true;
+                    if (checkSelfDeleteEnding()) return;
+                    showNote("畫面閃爍了一下，硬碟裡所有的錄影紀錄，一格一格全都消失了。", () => renderRoom('3F-A'));
+                });
+                navButton("先不要", () => showMonitorWall());
+            });
+        }
+
+        navButton("退出監視器牆", () => renderRoom('3F-A'));
+    }
+
+    function showApproachingFootage() {
+        controls.innerHTML = '';
+        textBox.innerHTML = applyGlitch(`螢幕上，一格畫面裡有個影子正快步逼近，動作看起來很眼熟。\n\n經過樓梯間的瞬間，監視器剛好拍到一張正臉——那張臉，看起來跟你自己很像。\n\n要刪掉這段畫面嗎？`);
+        createButton("刪除", () => {
+            const dead = updateStats(-3, 0);
+            if (dead) return;
+            showNote("畫面消失了，但走廊裡的腳步聲並沒有停下——刪掉紀錄，從來就阻止不了正在發生的事。", () => renderRoom('3F-A'));
+        });
+        createButton("先不要", () => renderRoom('3F-A'));
+    }
+
+    // ---- 3F-B 頂樓機房 ----
+    function renderRooftop() {
+        let text = `風聲呼嘯，外露的天線在夜色裡微微震動，電力在這裡稀薄得幾乎感覺不到。`;
+        if (gameState.antennaTried) text += `\n\n指尖殘留著一陣說不出的酥麻感，那截裸露的電路，似乎還在隱隱發燙。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        addChargeHoldButton("嘗試連接外露天線(效率極低)", 0.5, 0.1, {
+            onStart: () => { gameState.antennaTried = true; },
+            onStop: () => { renderRoom('3F-B'); }
+        });
+
+        if (gameState.antennaTried) {
+            createButton("碰一下裸露的電路", () => {
+                controls.innerHTML = '';
+                textBox.innerHTML = `指尖離電路只剩一點距離。`;
+                createButton("碰下去", () => {
+                    gameOver("一陣電流竄過全身，畫面碎成雪花。\n再次張開眼睛時，你發現自己躺在一支陌生的手機裡。\n這裡的一切，都很新——但都不是你的。\n\n──【BAD END・分享出去】──");
+                });
+                createButton("縮回手", () => renderRoom('3F-B'));
+            });
+        }
+    }
+
+    /* ============ 結束處理 ============ */
+    function gameOver(message) {
+        killChargeTimer();
+        gameState.monsterChasing = false;
+        textBox.innerHTML = `<span class="warning-text" style="font-size:14.5px;">${message.replace(/\n/g, '<br>')}</span>`;
+        roomLabel.textContent = '';
+        controls.innerHTML = '';
+        const btn = document.createElement('button');
+        btn.textContent = "重新載入意識(重新開始)";
+        btn.onclick = () => {
+            gameState = {
+                battery: 60, temp: 36.5, tempRevealed: false, corrupted: false, currentRoom: null, chargeTimer: null, observed: {},
+                lightOn: false, hasIcepack: false, icepackTaken: false, antennaTried: false, serverNoteViews: 0, flashlightOn: false,
+                doorUnlocked: false, doorCodeKnown: false,
+                breakerTripped: false, monsterBorn: false, monsterAlert: false, monsterChasing: false, chaseCounter: 0,
+                reachedCore: false, coreArrivalSafe: false,
+                photosDeleted: false, videoDeleted: false, fullChargeCount: 0
+            };
+            viewport.classList.remove('light-on', 'overheat-screen');
+            viewport.style.backgroundColor = '#000';
+            textBox.style.color = '#e0e0e0';
+            tempWrap.classList.add('stat-hidden');
+            showConsent();
+        };
+        controls.appendChild(btn);
+    }
+
+    /* ============ 啟動 ============ */
+    function start(saved) {
+        if (saved && saved.currentRoom) {
+            gameState = Object.assign(gameState, saved);
+            topBar.classList.remove('stat-hidden');
+            invBar.classList.remove('stat-hidden');
+            if (gameState.tempRevealed) tempWrap.classList.remove('stat-hidden');
+            viewport.classList.toggle('light-on', gameState.lightOn);
+            updateStats(0, 0);
+            renderRoom(gameState.currentRoom);
+        } else {
+            showConsent();
+        }
+    }
+    if (window.claude?.hot) {
+        window.claude.hot.snapshot(() => gameState);
+        window.claude.hot.ready ? window.claude.hot.ready(start) : start(window.claude.hot.data ?? {});
+    } else {
+        start(null);
+    }
+</script>
+</body>
+</html>
