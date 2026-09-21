@@ -161,19 +161,31 @@
         box-shadow: 0 0 50px rgba(255, 0, 0, 0.5) !important;
         animation: pulse-red 1.5s infinite alternate;
     }
+    /* 怪物只剩最後一步就會追上時，整個畫面用比過熱更急促的紅色脈動警告 */
+    .chase-critical {
+        border-color: #ff2222 !important;
+        box-shadow: 0 0 60px rgba(255, 0, 0, 0.75) !important;
+        animation: pulse-chase 0.6s infinite alternate;
+    }
 
     @keyframes blink { 50% { opacity: 0.3; } }
     @keyframes pulse-red {
         0% { background-color: #000; }
         100% { background-color: #1a0000; }
     }
+    @keyframes pulse-chase {
+        0% { background-color: #000; }
+        100% { background-color: #2a0000; }
+    }
     @media (prefers-reduced-motion: reduce) {
         .status-danger { animation: none; opacity: 1; }
         .overheat-screen { animation: none; background-color: #1a0000; }
+        .chase-critical { animation: none; background-color: #2a0000; }
     }
 </style>
 </head>
 <body>
+
 <div id="game-viewport">
     <div id="handheld-phone-bar" class="stat-hidden">
         <span>電量：<span id="battery-display" class="status-good">⚡ 100%</span></span>
@@ -194,25 +206,36 @@
 <script>
     /* ============ 資料設定 ============ */
     const FLOORS = [
-        { id: '3F',  name: '3F・控制與監視層', rooms: ['3F-A', '3F-B'] },
-        { id: '2F',  name: '2F・通訊與訊號層', rooms: ['2F-A', '2F-B'] },
-        { id: '1F',  name: '1F・表層辦公樓層', rooms: ['1F-A', '1F-B', '1F-C'] },
-        { id: 'B1F', name: 'B1F・快取與備品層', rooms: ['B1F-A', 'B1F-B', 'B1F-C'] },
-        { id: 'B2F', name: 'B2F・核心層', rooms: ['B2F-A', 'B2F-B'] }
+        { id: '3F',  name: '3F・控制與監視層', rooms: ['3F-A', '3F-B', '3F-C', '3F-D', '3F-E', '3F-F', '3F-G', '3F-H'] },
+        { id: '2F',  name: '2F・通訊與訊號層', rooms: ['2F-A', '2F-B', '2F-C', '2F-D', '2F-E', '2F-F', '2F-G', '2F-H'] },
+        { id: '1F',  name: '1F・表層辦公樓層', rooms: ['1F-A', '1F-B', '1F-C', '1F-D', '1F-E', '1F-F', '1F-G', '1F-H', '1F-I'] },
+        { id: 'B1F', name: 'B1F・快取與備品層', rooms: ['B1F-A', 'B1F-B', 'B1F-C', 'B1F-D', 'B1F-E', 'B1F-F', 'B1F-G', 'B1F-H', 'B1F-I'] },
+        { id: 'B2F', name: 'B2F・核心層', rooms: ['B2F-A', 'B2F-B', 'B2F-C', 'B2F-D', 'B2F-E', 'B2F-F', 'B2F-G', 'B2F-H'] }
     ];
     const ROOM_NAME = {
         '1F-A': '廢棄辦公室', '1F-B': '茶水間', '1F-C': '影印室',
+        '1F-D': '接待大廳', '1F-E': '大會議室', '1F-F': '儲藏間', '1F-G': '洗手間', '1F-H': '樓梯間', '1F-I': '主管辦公室',
         'B1F-A': '數據快取室', 'B1F-B': '雜物儲藏室', 'B1F-C': '廢棄伺服器室',
+        'B1F-D': '備品倉庫', 'B1F-E': '拆解工作台', 'B1F-F': '線材回收間', 'B1F-G': '緊急發電室', 'B1F-H': '清潔用品間', 'B1F-I': '維修工作台',
         'B2F-A': '配電室', 'B2F-B': '核心機房',
+        'B2F-C': '冷卻機房', 'B2F-D': '管線維修間', 'B2F-E': '逃生梯井', 'B2F-F': '備援電池室', 'B2F-G': '警報控制室', 'B2F-H': '廢棄升降梯井',
         '2F-A': '基地台訊號室', '2F-B': '電話總機室',
-        '3F-A': '監控室', '3F-B': '頂樓機房'
+        '2F-C': '廣播控制室', '2F-D': '資訊室', '2F-E': '配線間', '2F-F': '員工休息角', '2F-G': '影印機房', '2F-H': '訊號中繼室',
+        '3F-A': '監控室', '3F-B': '頂樓機房',
+        '3F-C': '警衛室', '3F-D': '值班休息室', '3F-E': '主機房', '3F-F': '文件室', '3F-G': '小會議室', '3F-H': '逃生梯間出口'
     };
+    // 這批房間先不開放，門是鎖死的——留著給之後擴充或純粹當環境敘事的紅鯡魚
+    const LOCKED_ROOMS = new Set(['3F-E', '3F-H', '2F-G', '1F-E', '1F-H', 'B1F-D', 'B1F-E', 'B1F-F', 'B1F-I', 'B2F-E', 'B2F-F']);
     const ROOM_FLOOR = {};
     FLOORS.forEach(f => f.rooms.forEach(r => ROOM_FLOOR[r] = f.id));
     const HEAT_THRESHOLD = 45.0; // 超過這個溫度，畫面才開始變紅、文字開始亂
 
     /* ============ 遊戲狀態 ============ */
-    const CHASE_CATCH_THRESHOLD = 6; // 被怪物追擊時，累積這麼多次「行動」就會被抓到
+    const CHASE_START_DISTANCE = 8;      // 追逐開始時的「距離」，歸零就被抓到(拉長一點，讓玩家有機會真的跑回配電室)
+    const MONSTER_ATTRACT_ALERT = 4;     // 「注意力」累積到這裡，牠已經注意到你了(monsterAlert)
+    const MONSTER_ATTRACT_CHASE = 8;     // 「注意力」累積到這裡，正式進入追逐狀態
+    const MONSTER_ATTRACT_MAX = 10;
+    const MONSTER_ATTRACT_DECAY = 0.15;  // 沒有斷電、沒有充電時，注意力每個行動自然衰減多少
 
     let gameState = {
         battery: 60,
@@ -234,10 +257,15 @@
         doorCodeKnown: false,
         breakerTripped: false,
 
+        waterDrinksLeft: 3,
+        drawerUnlocked: false,
+        alarmPulled: false,
+
         monsterBorn: false,
         monsterAlert: false,
+        monsterAttraction: 0,
         monsterChasing: false,
-        chaseCounter: 0,
+        chaseDistance: CHASE_START_DISTANCE,
 
         reachedCore: false,
         coreArrivalSafe: false,
@@ -396,11 +424,15 @@
                     btn.textContent = "⚠️ 線材接觸不良！斷開了！(重新按住)";
                     return;
                 }
-                if (opts.attractMonster && seconds > 3 && gameState.monsterBorn) {
-                    gameState.monsterAlert = true;
-                    stopCharge();
-                    showNote("【刺耳的摩擦聲！】黑暗深處，有什麼東西注意到了正在發亮的手機，你不得不停止充電！");
-                    return;
+                // 充電就是在放出電流，效率越高的裝置訊號越大，斷電後失去環境雜訊掩護，訊號會被放大
+                if (gameState.monsterBorn && !gameState.monsterChasing) {
+                    const gain = battRate * 0.3 * (gameState.breakerTripped ? 2 : 1);
+                    const started = accumulateAttraction(gain);
+                    if (started) {
+                        stopCharge();
+                        showNote("【刺耳的雜訊竄過掌心！】黑暗深處，有什麼東西突然停下了動作——它感覺到你了。腳步聲，開始朝這裡靠近。");
+                        return;
+                    }
                 }
                 const dead = updateStats(battRate, tempRate);
                 if (dead) return;
@@ -434,19 +466,48 @@
 
     /* ============ 移動系統：退回走廊(本樓層房間) → 可選前往其他樓層 ============ */
     function chaseBanner() {
-        if (!gameState.monsterChasing) return '';
-        const ratio = gameState.chaseCounter / CHASE_CATCH_THRESHOLD;
-        let msg;
-        if (ratio < 0.34) msg = '你聽見很輕的腳步聲，在很遠的地方。';
-        else if (ratio < 0.67) msg = '腳步聲又近了一些，你分不清它在哪個方向。';
-        else msg = '它已經很近了——你幾乎能聽見它的呼吸。';
-        return msg + '\n\n';
+        if (!gameState.monsterChasing) { viewport.classList.remove('chase-critical'); return ''; }
+        const d = gameState.chaseDistance;
+        let msg, danger = false;
+        if (d >= 6) msg = '你聽見很輕的腳步聲，在很遠的地方。';
+        else if (d >= 4) msg = '腳步聲又近了一些，你分不清它在哪個方向。';
+        else if (d >= 2) { msg = '腳步聲清楚了起來——它知道你在哪裡。'; danger = true; }
+        else { msg = '⚠️ 它幾乎就在你身後了——再不遠離，下一步就會被追上。'; danger = true; }
+        viewport.classList.toggle('chase-critical', d <= 1);
+        const html = danger ? `<span class="warning-text">${msg}</span>` : msg;
+        return html + '\n\n';
+    }
+
+    /* 追逐尚未開始時，累積「牠的注意力」：斷電後會被身上的電量持續放大，平時則會自然衰減 */
+    function accumulateAttraction(extraGain = 0) {
+        if (!gameState.monsterBorn || gameState.monsterChasing) return false;
+        let delta = extraGain;
+        if (gameState.breakerTripped) {
+            // 斷電後沒有背景雜訊掩護，電量本身就是訊號強度，不再被自然衰減抵銷
+            delta += (gameState.battery / 100) * 1.2;
+        } else {
+            // 燈還亮著、有其他分接頭當掩護時，注意力會慢慢消退
+            delta -= MONSTER_ATTRACT_DECAY;
+        }
+        gameState.monsterAttraction = Math.max(0, Math.min(MONSTER_ATTRACT_MAX, (gameState.monsterAttraction || 0) + delta));
+
+        if (gameState.monsterAttraction >= MONSTER_ATTRACT_ALERT) gameState.monsterAlert = true;
+
+        if (gameState.monsterAttraction >= MONSTER_ATTRACT_CHASE) {
+            gameState.monsterChasing = true;
+            gameState.chaseDistance = CHASE_START_DISTANCE;
+            return true;
+        }
+        return false;
     }
 
     function tickChase() {
-        if (!gameState.monsterChasing) return false;
-        gameState.chaseCounter++;
-        if (gameState.chaseCounter >= CHASE_CATCH_THRESHOLD) {
+        if (!gameState.monsterChasing) {
+            accumulateAttraction();
+            return false;
+        }
+        gameState.chaseDistance -= 1;
+        if (gameState.chaseDistance <= 0) {
             gameOver("黑暗裡，那個「複製出來的自己」終於追上了你。\n它的臉，和你記憶中的自己一模一樣。\n\n它沒有攻擊你，只是伸出手，貼上了你的胸口。\n\n你這才明白，它從來要的不是你的臉、不是你的位置——它要的是你身上的電。\n那是它唯一能活下去的方式。\n\n電量以看得見的速度往它身上流過去，你的視野一格一格暗下來，直到什麼都不剩。\n\n──【BAD END・被抓到了】──");
             return true;
         }
@@ -468,6 +529,7 @@
         roomLabel.textContent = `${floorId}・走廊`;
 
         floor.rooms.forEach(rid => {
+            if (LOCKED_ROOMS.has(rid)) return;
             if (rid === 'B2F-B' && !gameState.doorUnlocked) {
                 const btn = createButton(`🔒 ${ROOM_NAME[rid]}`, () => {});
                 btn.disabled = true;
@@ -480,11 +542,13 @@
 
     function showOtherFloors() {
         controls.innerHTML = '';
-        textBox.innerHTML = applyGlitch(`${chaseBanner()}要往哪一層走？`);
+        textBox.innerHTML = applyGlitch(`${chaseBanner()}要往哪一層走？只能先爬一層，到了那一層才知道有哪些房間。`);
         roomLabel.textContent = '走廊';
         const currentFloorId = ROOM_FLOOR[gameState.currentRoom];
-        FLOORS.forEach(floor => {
+        const currentIdx = FLOORS.findIndex(f => f.id === currentFloorId);
+        FLOORS.forEach((floor, idx) => {
             if (floor.id === currentFloorId) return;
+            if (Math.abs(idx - currentIdx) !== 1) return;
             navButton(floor.id, () => showFloorRooms(floor));
         });
         navButton("← 返回", showCorridor);
@@ -495,6 +559,7 @@
         textBox.innerHTML = applyGlitch(`${chaseBanner()}${floor.id}`);
         roomLabel.textContent = `${floor.id}・走廊`;
         floor.rooms.forEach(rid => {
+            if (LOCKED_ROOMS.has(rid)) return;
             if (rid === 'B2F-B' && !gameState.doorUnlocked) {
                 const btn = createButton(`🔒 ${ROOM_NAME[rid]}`, () => {});
                 btn.disabled = true;
@@ -505,21 +570,27 @@
         navButton("← 返回", showOtherFloors);
     }
 
-    function attemptMove(id) {
+    function attemptMove(id, opts = {}) {
         const fromFloorId = ROOM_FLOOR[gameState.currentRoom];
         const toFloorId = ROOM_FLOOR[id];
         const sameFloor = toFloorId === fromFloorId;
         const floorDist = Math.abs(FLOORS.findIndex(f => f.id === fromFloorId) - FLOORS.findIndex(f => f.id === toFloorId));
-        const cost = sameFloor ? 3 : 3 + 3 * floorDist; // 每跨一層樓多扣一份電量，樓層差越多耗電越多
+        let cost = sameFloor ? 3 : 3 + 3 * floorDist; // 每跨一層樓多扣一份電量，樓層差越多耗電越多
+        if (opts.viaElevator) cost += 5; // 廢棄升降梯井：跨樓層捷徑，代價極高
         const fromFloor = ROOM_FLOOR[gameState.currentRoom];
         const dead = updateStats(-cost, 0);
         if (dead) return;
+
+        // 真的移動到新房間，等於主動拉開了跟怪物的距離，抵銷掉 tickChase() 剛才扣的那一步
+        if (gameState.monsterChasing) {
+            gameState.chaseDistance = Math.min(CHASE_START_DISTANCE, gameState.chaseDistance + 1);
+        }
 
         if (fromFloor === '1F' && ROOM_FLOOR[id] !== '1F' && !gameState.monsterBorn) {
             gameState.monsterBorn = true;
             gameState.currentRoom = id;
             controls.innerHTML = '';
-            textBox.innerHTML = applyGlitch(`你正要離開這一層樓，身後忽然傳來「唰——唰——」的聲音，\n像是有什麼機器自己動了起來，一張一張地吐出紙。\n\n你沒有回頭看。`);
+            textBox.innerHTML = applyGlitch(`你正要離開這一層樓，身後忽然傳來「唰——唰——」的聲音，\n像是有什麼機器自己動了起來，一張一張地吐出紙。\n\n你沒有回頭看，只聽見很輕的腳步聲，一下、一下，往地下的方向去，漸漸聽不見了。`);
             roomLabel.textContent = '？？？';
             createButton("繼續往前走", () => renderRoom(id));
             return;
@@ -596,10 +667,15 @@
 
         const renderers = {
             '1F-A': renderOffice, '1F-B': renderBreakroom, '1F-C': renderCopyroom,
+            '1F-D': renderLobby, '1F-F': renderStoreroom2, '1F-G': renderRestroom, '1F-I': renderManagerOffice,
             'B1F-A': renderCacheroom, 'B1F-B': renderStorage, 'B1F-C': renderServerroom,
+            'B1F-G': renderGenerator, 'B1F-H': renderCleaningroom,
             'B2F-A': renderElectrical, 'B2F-B': renderCore,
+            'B2F-C': renderCoolingroom, 'B2F-D': renderPiperoom, 'B2F-G': renderAlarmroom, 'B2F-H': renderElevatorShaft,
             '2F-A': renderSignal, '2F-B': renderSwitchboard,
-            '3F-A': renderMonitor, '3F-B': renderRooftop
+            '2F-C': renderBroadcastroom, '2F-D': renderInforoom, '2F-E': renderWiringroom, '2F-F': renderLoungeCorner, '2F-H': renderRelayroom,
+            '3F-A': renderMonitor, '3F-B': renderRooftop,
+            '3F-C': renderGuardroom, '3F-D': renderDutyroom, '3F-F': renderDocroom, '3F-G': renderMeetingroom
         };
         renderers[id]();
         if (gameState.monsterChasing) textBox.innerHTML = applyGlitch(chaseBanner()) + textBox.innerHTML;
@@ -632,6 +708,8 @@
         });
 
         createButton("翻閱桌上的《新人入職手冊》", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
             showNote("封面印著褪色的公司標語，內頁是一堆制式規定：\n上班時間須著端莊服裝、茶水間垃圾請自行分類、\n影印機故障請洽總務、遲到三次將列入年度考核……\n\n讀到一半，你甚至有點恍神——這些規定平凡得像是隨便哪家公司都會有的東西，跟眼前這一切完全對不上。\n\n直到翻到頁尾角落，一行不起眼的小字才讓人有點在意：\n\n「裝置效能異常時，建議聯繫管理員進行原廠設定。」", () => renderRoom('1F-A'));
         });
 
@@ -673,6 +751,8 @@
         textBox.innerHTML = applyGlitch(text);
 
         createButton("翻看那疊文件", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
             showNote("每一張，內容都一模一樣：都是同一份《新人入職手冊》的複本，一張疊著一張，疊了不知道多少層。", () => renderRoom('1F-C'));
         });
 
@@ -685,7 +765,7 @@
         if (!gameState.monsterBorn) {
             createButton("按下事務機的「列印」鍵", () => {
                 gameState.monsterBorn = true;
-                showNote("機器發出刺耳的運轉聲，吐出一張紙——\n紙上印著的，是你自己的臉。\n\n機器停了下來，指示燈熄滅。\n\n黑暗裡，某個角落，有什麼東西醒了過來。", () => renderRoom('1F-C'));
+                showNote("機器發出刺耳的運轉聲，吐出一張紙——\n紙上印著的，是你自己的臉。\n\n機器停了下來，指示燈熄滅。\n\n你還沒回過神，就看見門口——一團低畫質、像霧一樣模糊的黑色人形，停頓了一下，然後緩緩轉身，朝地下室的方向飄去。\n\n沒有看到腳，卻聽得到腳步聲，一下、一下，越來越遠——牠在往電力充足的地方走。", () => renderRoom('1F-C'));
             });
         }
     }
@@ -704,11 +784,13 @@
         });
 
         createButton("查看機櫃上的維修標籤", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
             gameState.doorCodeKnown = true;
             showNote("泛黃的標籤貼在機櫃側面，是技術人員留下的：\n\n「緊急存取碼(地下二樓配電室)：404」\n\n下面還有一行潦草的字：\n「電力異常時使用，勿外流。」", () => renderRoom('B1F-A'));
         });
 
-        addChargeHoldButton("連接高壓快充機櫃", 5, 2.0, { attractMonster: true });
+        addChargeHoldButton("連接高壓快充機櫃", 5, 2.0);
     }
 
     // ---- B1F-B 雜物儲藏室 ----
@@ -747,6 +829,8 @@
         textBox.innerHTML = applyGlitch(text);
 
         createButton("翻看牆上的維修申請單", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
             gameState.serverNoteViews++;
             const msg = gameState.serverNoteViews === 1
                 ? "其中一張寫著：\n「裝置反應遲緩，已建議恢復原廠設定。」\n下方是另一行筆跡：\n「申請人拒絕。」\n\n再往下翻，同樣的紀錄還有很多張，日期都不一樣，字跡卻越來越潦草。"
@@ -781,7 +865,7 @@
         }
         textBox.innerHTML = applyGlitch(text);
 
-        createButton("把線頭碰觸高壓銅排(賭一把)", () => {
+        createButton("把線頭碰觸高壓銅排", () => {
             let dead, msg;
             if (Math.random() < 0.5) { dead = updateStats(-30, 8.0); msg = "【短路火花爆裂！】高壓電弧擊穿了線材，電量瞬間流失，體溫也跟著飆升！"; }
             else { dead = updateStats(40, 6.0); msg = "【高壓強充成功！】巨量電流灌入，電量暴增，但體溫也急劇上升！"; }
@@ -793,16 +877,16 @@
             let msg;
             if (gameState.breakerTripped) {
                 if (gameState.monsterBorn) {
-                    gameState.monsterChasing = true;
-                    gameState.chaseCounter = 0;
-                    msg = "整棟樓陷入絕對黑暗的瞬間，你聽見遠處傳來一聲很輕的「腳步聲」。它好像，正在往這裡走。";
+                    msg = "整棟樓陷入絕對黑暗的瞬間，插座跟著全部斷電——所有還在充電的東西，一瞬間都停了下來。\n\n黑暗裡，只剩下你手上這支手機，還在悄悄發著光。";
                 } else {
                     msg = "整棟樓的電力被切斷，陷入絕對的黑暗與寂靜。";
                 }
             } else {
                 gameState.monsterChasing = false;
-                gameState.chaseCounter = 0;
-                msg = "電力恢復。遠處的腳步聲，似乎也停了下來。";
+                gameState.monsterAttraction = 0;
+                gameState.chaseDistance = CHASE_START_DISTANCE;
+                viewport.classList.remove('chase-critical');
+                msg = "電力恢復。黑暗裡原本若有似無的腳步聲，好像也跟著消失了。";
             }
             showNote(msg, () => renderRoom('B2F-A'));
         });
@@ -810,7 +894,7 @@
 
     // ---- B2F-B 核心機房 ----
     function allRoomsExplored() {
-        return Object.keys(ROOM_NAME).every(id => id === '1F-A' || gameState.observed[id]);
+        return Object.keys(ROOM_NAME).filter(id => !LOCKED_ROOMS.has(id)).every(id => id === '1F-A' || gameState.observed[id]);
     }
 
     function renderCore() {
@@ -842,8 +926,8 @@
                 textBox.style.color = '#000';
                 const hidden = !gameState.monsterAlert && !gameState.photosDeleted && !gameState.videoDeleted
                     && allRoomsExplored() && gameState.coreArrivalSafe;
-                const totalRooms = Object.keys(ROOM_NAME).length;
-                const exploredRooms = Object.keys(ROOM_NAME).filter(id => id === '1F-A' || gameState.observed[id]).length;
+                const totalRooms = Object.keys(ROOM_NAME).filter(id => !LOCKED_ROOMS.has(id)).length;
+                const exploredRooms = Object.keys(ROOM_NAME).filter(id => !LOCKED_ROOMS.has(id) && (id === '1F-A' || gameState.observed[id])).length;
                 const completeness = Math.round((exploredRooms / totalRooms) * 100);
                 let recoveryText;
                 if (completeness >= 100) {
@@ -921,6 +1005,8 @@
                 createButton("▸ 繼續", () => renderRoom('3F-A'));
                 return;
             }
+            const dead = updateStats(-1, 0);
+            if (dead) return;
             textBox.innerHTML = applyGlitch(`每一張照片你都覺得熟悉，卻怎麼也想不起來是什麼時候拍的。時間戳記一路排到——今天。\n\n看著這些照片，你忽然覺得有點不安。要撕掉這些照片嗎？你告訴自己，這只是不想讓不相干的人看到不該看的東西。`);
             createButton("撕掉", () => {
                 gameState.photosDeleted = true;
@@ -959,6 +1045,8 @@
         ['one', 'two', 'three'].forEach((key, i) => {
             createButton(`片段${'一二三'[i]}`, () => {
                 controls.innerHTML = '';
+                const dead = updateStats(-1, 0);
+                if (dead) return;
                 textBox.innerHTML = applyGlitch(gameState.videoDeleted
                     ? `這一格畫面只剩空白——這段紀錄已經被刪除了。`
                     : clipContent[key]);
@@ -969,12 +1057,16 @@
         if (gameState.videoDeleted) {
             createButton("即時畫面", () => {
                 controls.innerHTML = '';
+                const dead = updateStats(-1, 0);
+                if (dead) return;
                 textBox.innerHTML = applyGlitch(`螢幕忽然亮起，畫面是這個監控室的即時影像——一片空白，錄影紀錄早就被刪掉了。`);
                 navButton("▸ 返回", showMonitorWall);
             });
         } else {
             createButton("即時畫面", () => {
                 controls.innerHTML = '';
+                const dead = updateStats(-1, 0);
+                if (dead) return;
                 textBox.innerHTML = applyGlitch(`螢幕忽然亮起，畫面是這個監控室的即時影像——你看見自己，正站在這裡，抬頭看著螢幕。\n\n你下意識地舉起手，對著鏡頭揮了揮。\n\n畫面裡的自己，同一瞬間，也舉起了手。\n\n沒有延遲，沒有半點時間差——就像對方，本來就知道你會做這個動作。\n\n要刪掉所有錄影紀錄嗎？`);
                 createButton("刪除全部紀錄", () => {
                     gameState.videoDeleted = true;
@@ -990,6 +1082,8 @@
 
     function showApproachingFootage() {
         controls.innerHTML = '';
+        const dead0 = updateStats(-1, 0);
+        if (dead0) return;
         textBox.innerHTML = applyGlitch(`螢幕上，一格畫面裡有個影子正快步逼近，動作看起來很眼熟。\n\n經過樓梯間的瞬間，監視器剛好拍到一張正臉——那張臉，看起來跟你自己很像。\n\n要刪掉這段畫面嗎？`);
         createButton("刪除", () => {
             const dead = updateStats(-3, 0);
@@ -1005,7 +1099,7 @@
         if (gameState.antennaTried) text += `\n\n指尖殘留著一陣說不出的酥麻感，那截裸露的電路，似乎還在隱隱發燙。`;
         textBox.innerHTML = applyGlitch(text);
 
-        addChargeHoldButton("嘗試連接外露天線(效率極低)", 0.5, 0.1, {
+        addChargeHoldButton("嘗試連接外露天線", 0.5, 0.1, {
             onStart: () => { gameState.antennaTried = true; },
             onStop: () => { renderRoom('3F-B'); }
         });
@@ -1022,10 +1116,486 @@
         }
     }
 
+    // ---- 3F-C 警衛室 ----
+    function renderGuardroom() {
+        let text = `牆邊立著一支桌上型對講機，桌上攤著一疊巡邏簽到表，角落還有一台故障的臉部辨識機。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("拿起桌上型對講機", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            const msg = gameState.breakerTripped
+                ? "斷電之後，雜訊忽然清晰了不少——你聽見一個很輕的聲音，斷斷續續地重複著同一句話：「……不是我……不是我……」"
+                : "對講機裡只有一片沙沙的雜訊，偶爾夾雜幾個聽不清楚的音節，像是很久沒有人回應過這個頻道。";
+            showNote(msg, () => renderRoom('3F-C'));
+        });
+
+        createButton("翻看巡邏簽到表", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("簽名一路排到今天的日期，字跡卻一模一樣，連筆畫的角度都分毫不差——像是同一個人，一次又一次簽下自己的名字。", () => renderRoom('3F-C'));
+        });
+
+        createButton("嘗試使用臉部辨識機", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            const msg = gameState.monsterBorn
+                ? "螢幕亮起，畫面上卻疊著兩張幾乎重合的臉，機器發出刺耳的錯誤音，怎麼也辨識不出來。"
+                : "螢幕閃了幾下，最後停在一行紅字：「辨識失敗，查無此人。」——明明鏡頭裡，站著的就是你自己。";
+            showNote(msg, () => renderRoom('3F-C'));
+        });
+    }
+
+    // ---- 3F-D 值班休息室 ----
+    function renderDutyroom() {
+        let text = `一張行軍床靠在牆邊，角落有一台插著電的老式收音機，訊號全是雜訊。牆上貼著一張排班表。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("躺上行軍床", () => {
+            showNote("床墊又硬又冷，躺下去也感覺不到一絲睡意——這具身體，好像早就不需要休息了。", () => renderRoom('3F-D'));
+        });
+
+        addChargeHoldButton("連接老式收音機", 1.5, 0.3);
+
+        createButton("查看排班表", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("值班的名字被劃掉又重新寫上，來回好幾次，最後一次的筆跡幾乎壓穿了紙——寫的，還是同一個名字。", () => renderRoom('3F-D'));
+        });
+    }
+
+    // ---- 3F-F 文件室 ----
+    function renderDocroom() {
+        let text = `一排檔案櫃靠牆而立，角落是一台碎紙機，桌上放著一份「裝置報廢申請書」。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("翻閱檔案櫃裡的員工名冊", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("名冊一頁一頁翻下去，職稱、部門都不一樣，唯獨姓名欄，從頭到尾只有一個名字反覆出現。", () => renderRoom('3F-F'));
+        });
+
+        createButton("嘗試插線至碎紙機", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            showNote("接頭規格不符——USB-A，插不進去，白白耗了點電。", () => renderRoom('3F-F'));
+        });
+
+        createButton("閱讀「裝置報廢申請書」", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("申請書上寫著報廢原因：「裝置老舊，效能低落，建議直接更換。」\n\n核准欄蓋著一個模糊的章，日期，是很久以前的事了。", () => renderRoom('3F-F'));
+        });
+    }
+
+    // ---- 3F-G 小會議室 ----
+    function renderMeetingroom() {
+        let text = `投影機還亮著，白板上殘留擦不乾淨的字跡，角落的喇叭傳出斷續的電流雜訊。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("觀看投影機畫面", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            const msg = gameState.breakerTripped
+                ? "斷電之後，投影機不該還亮著，畫面卻仍舊映在牆上——只是內容變了，一行一行的紅字不斷跳動，你看不懂上面寫的是什麼語言。"
+                : "投影幕上撥放著一份同意書，條款一條接一條，內容和你當初簽署的那份幾乎一模一樣。";
+            showNote(msg, () => renderRoom('3F-G'));
+        });
+
+        createButton("查看白板", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("白板上殘留著擦不乾淨的字跡，被反覆擦拭又寫上，疊出一層灰白的痕跡，勉強能認出幾個字：「不要相信」。", () => renderRoom('3F-G'));
+        });
+
+        createButton("靠近喇叭", () => {
+            const dead = updateStats(-1, 0.2);
+            if (dead) return;
+            showNote("喇叭傳出一陣持續的電流雜訊，音量忽大忽小，像是有什麼東西正透過它，斷斷續續地呼吸。", () => renderRoom('3F-G'));
+        });
+    }
+
+    // ---- 2F-C 廣播控制室 ----
+    function renderBroadcastroom() {
+        let text = `廣播麥克風與擴大機立在牆邊，桌上堆著一疊播音稿，牆上的時鐘停在一個奇怪的位置。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        addChargeHoldButton("連接廣播麥克風與擴大機", 3, 1.0);
+
+        createButton("翻看播音稿", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("一疊播音稿，內容全都一樣：「各位同仁請注意，目前大樓電力系統運作正常，請勿驚慌。」\n\n日期欄位卻是空的，一張都沒有填。", () => renderRoom('2F-C'));
+        });
+
+        createButton("查看故障的時鐘", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("時鐘的指針停在同一個位置，不管過了多久都沒有動過——彷彿從某一刻起，這裡的時間，就再也沒有往前走。", () => renderRoom('2F-C'));
+        });
+    }
+
+    // ---- 2F-D 資訊室 ----
+    function renderInforoom() {
+        let text = `一台辦公用桌機擺在桌上，旁邊是印表機耗材櫃，角落還有一台亮著微光的平板。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("嘗試插線至辦公用桌機", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            showNote("跟一樓那台一樣，是舊式的 USB-A 接口，你的線插不進去，白白耗了點電。", () => renderRoom('2F-D'));
+        });
+
+        createButton("翻找印表機耗材櫃", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("櫃子裡只剩幾支乾掉的碳粉匣，還有幾張用過的紙——每一張，印的都是同一份文件的殘頁。", () => renderRoom('2F-D'));
+        });
+
+        createButton("查看平板螢幕", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("平板還亮著微弱的電量，畫面停在一則寫到一半、始終沒有送出的訊息：「如果你看到這則訊息，代表我已經——」\n\n後面的字，怎麼樣都點不開了。", () => renderRoom('2F-D'));
+        });
+    }
+
+    // ---- 2F-E 配線間 ----
+    function renderWiringroom() {
+        let text = `牆面配線板插孔混亂，旁邊是一箱線材整理箱，牆上貼著一張配線圖。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("嘗試插線至牆面配線板", () => {
+            const short = Math.random() < 0.4;
+            const dead = short ? updateStats(-6, 1.5) : updateStats(15, 0);
+            if (dead) return;
+            showNote(short ? "插孔忽然爆出一小簇火花，線材瞬間短路，你反射性地抽回手。" : "意外插對了線路，一股穩定的電流灌了進來，電量回升了不少。", () => renderRoom('2F-E'));
+        });
+
+        createButton("翻找線材整理箱", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("箱子裡堆滿各種規格的線材，卻沒有一條跟你手上這條完全吻合——這棟樓裡的接口，好像從來都不打算讓你成功。", () => renderRoom('2F-E'));
+        });
+
+        createButton("查看配線圖", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("配線圖上密密麻麻標著各樓層的線路，其中「B2F」這兩個字被人用筆反覆描過，墨跡都暈開了，像是在提醒自己什麼。", () => renderRoom('2F-E'));
+        });
+    }
+
+    // ---- 2F-F 員工休息角 ----
+    function renderLoungeCorner() {
+        let text = `一台自動販賣機插著電，旁邊是一張陷下去的沙發，牆上掛著一塊過期的公佈欄。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("投入代幣，按下按鈕", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("機器發出沉悶的運轉聲，最後只掉出一包過期很久的餅乾，包裝袋都氧化了。你猶豫了一下，還是沒有打開。", () => renderRoom('2F-F'));
+        });
+
+        createButton("伸手進退幣口掏零錢", () => {
+            if (Math.random() < 0.25) {
+                gameOver("指尖才剛碰到退幣口內側，一陣尖銳的電流猛地竄過手臂，像是有什麼東西狠狠咬了一口。\n\n你甚至來不及縮手，眼前的畫面就已經扭曲成一片雪花。\n\n──【BAD END・觸電】──");
+                return;
+            }
+            const dead = updateStats(-3, 0.5);
+            if (dead) return;
+            showNote("指尖傳來一陣輕微的刺痛感，你迅速把手縮了回來——退幣口裡，什麼都沒有。", () => renderRoom('2F-F'));
+        });
+
+        createButton("坐在沙發上休息", () => {
+            showNote("沙發早已陷下去一塊，坐上去卻感覺不到任何疲勞——這具身體，本來就不會累。", () => renderRoom('2F-F'));
+        });
+
+        createButton("查看過期公佈欄", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("公佈欄上貼著一張活動海報，日期早已過期——但奇怪的是，上面蓋的核准章，日期卻是今天。", () => renderRoom('2F-F'));
+        });
+    }
+
+    // ---- 2F-H 訊號中繼室 ----
+    function renderRelayroom() {
+        let text = `一組小型基地台設備嗡嗡運轉著，牆邊的警示燈靜靜亮著。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        addChargeHoldButton("連接小型基地台設備", 6, 1.5);
+
+        createButton("觀察警示燈", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            const msg = gameState.breakerTripped
+                ? "斷電之後，警示燈忽然規律地閃了起來，紅光一明一滅，跟其他樓層陷入的死寂，形成一種很不協調的對照。"
+                : "警示燈靜靜地亮著綠光，沒有任何異狀——至少現在看起來是這樣。";
+            showNote(msg, () => renderRoom('2F-H'));
+        });
+    }
+
+    // ---- 1F-D 接待大廳 ----
+    function renderLobby() {
+        let text = `櫃台上擺著一台電腦，桌邊放著一本訪客登記本，角落是一台故障的飲水機。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("嘗試插線至櫃台電腦", () => {
+            const dead = updateStats(-2, 0);
+            if (dead) return;
+            showNote("又是 USB-A，接頭插不進去，白白耗了點電。", () => renderRoom('1F-D'));
+        });
+
+        createButton("翻看訪客登記本", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("最後一筆登記，寫的是你自己的名字，字跡卻不是你熟悉的筆順——時間欄填的，是你「醒來」之前的時間。", () => renderRoom('1F-D'));
+        });
+
+        createButton("喝一口故障飲水機的水", () => {
+            if (gameState.waterDrinksLeft <= 0) {
+                showNote("你猶豫了一下，還是沒有把嘴湊上去——這具身體已經喝了不少水，再喝下去，感覺不太妙。", () => renderRoom('1F-D'));
+                return;
+            }
+            gameState.waterDrinksLeft--;
+            const dead = updateStats(0, -3.0);
+            if (dead) return;
+            showNote("水流斷斷續續，帶著一點鐵鏽味，涼意很快地順著喉頭蔓延開來——雖然你其實沒有喉嚨。", () => renderRoom('1F-D'));
+        });
+    }
+
+    // ---- 1F-F 儲藏間 ----
+    function renderStoreroom2() {
+        let text = `清潔用具堆在角落，旁邊是一箱舊手機殼，還有一個上鎖的置物櫃。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("翻看清潔用具", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("拖把、水桶、幾罐見底的清潔劑，堆在角落積了薄薄一層灰——這裡好像很久沒有人真正打掃過了。", () => renderRoom('1F-F'));
+        });
+
+        createButton("翻看那箱舊手機殼", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("整整一箱，型號跟你手上這支一模一樣，數量多到數不清——像是為了某種你還不明白的用途，事先準備好的。", () => renderRoom('1F-F'));
+        });
+
+        createButton("嘗試打開上鎖的置物櫃", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("鎖死了，怎麼拉都拉不開，櫃門上連個鑰匙孔都看不見——好像從一開始，就沒打算讓人打開。", () => renderRoom('1F-F'));
+        });
+    }
+
+    // ---- 1F-G 洗手間 ----
+    function renderRestroom() {
+        let text = `一面鏡子掛在洗手台上方，旁邊是一台烘手機，門後貼著一張公告。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("照鏡子", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            const msg = gameState.corrupted
+                ? "鏡子裡的臉，跟你對不上節奏——你眨眼，它慢了半拍才眨；你張嘴，它的嘴角卻先動了。"
+                : "鏡子裡是你自己的臉，看起來很正常——正常到，讓你有點不安。";
+            showNote(msg, () => renderRoom('1F-G'));
+        });
+
+        createButton("先不要看鏡子", () => {
+            showNote("你別開視線，沒有看它。有些東西，好像還是不知道比較好。", () => renderRoom('1F-G'));
+        });
+
+        addChargeHoldButton("使用烘手機", 1, 0.2, { ignoreBreaker: true });
+
+        createButton("查看門後的公告", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("公告上寫著：「請愛惜公物，節約用電」——字體是很普通的印刷體，卻不知道為什麼，讓人覺得有點諷刺。", () => renderRoom('1F-G'));
+        });
+    }
+
+    // ---- 1F-I 主管辦公室 ----
+    function renderManagerOffice() {
+        let text = `一張獨立辦公桌靠窗擺放，抽屜上著鎖，桌上還有一台筆電和一份寫到一半的信。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton(gameState.drawerUnlocked ? "抽屜(已經打開過了)" : "嘗試打開上鎖的抽屜", () => {
+            if (gameState.drawerUnlocked) {
+                showNote("抽屜已經被你打開過了，裡面只剩空蕩蕩的隔層。", () => renderRoom('1F-I'));
+                return;
+            }
+            controls.innerHTML = '';
+            textBox.innerHTML = applyGlitch(`抽屜上是一個小型密碼鎖，四位數字。`);
+            addCodeInput((val) => {
+                if (val === '404') {
+                    gameState.drawerUnlocked = true;
+                    showNote("鎖『喀』一聲彈開。抽屜裡沒有任何值錢的東西，只有一張員工識別證——照片上的臉，和你手上這支手機鎖屏畫面裡的臉，長得一模一樣。", () => renderRoom('1F-I'));
+                } else {
+                    const dead = updateStats(-2, 0);
+                    if (dead) return;
+                    showNote("密碼不對，鎖沒有反應，這幾秒的嘗試還是耗了點電。", () => renderRoom('1F-I'));
+                }
+            });
+        });
+
+        addChargeHoldButton("連接筆電", 4, 1.0);
+
+        createButton("閱讀那份寫到一半的離職信", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("信只寫了開頭：「敬啟者，本人因個人因素，即日起申請離職——」\n\n後面是空白的，一個字都沒有繼續，像是寫到一半，就再也沒有機會寫下去。", () => renderRoom('1F-I'));
+        });
+    }
+
+    // ---- B1F-G 緊急發電室 ----
+    function renderGenerator() {
+        let text = `一台小型備用發電機轟隆作響，旁邊放著幾桶油，牆上掛著操作手冊。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        addChargeHoldButton("啟動小型備用發電機", 8, 4.0);
+
+        createButton("查看油桶", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("油桶已經半空，桶身外殼有些鏽蝕，貼著一張「易燃」警告貼紙。", () => renderRoom('B1F-G'));
+        });
+
+        createButton("閱讀操作手冊", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("手冊裡夾著一頁警語：「發電機連續運轉恐導致機體過熱，請勿長時間連接。」你把這句話記在心裡。", () => renderRoom('B1F-G'));
+        });
+    }
+
+    // ---- B1F-H 清潔用品間 ----
+    function renderCleaningroom() {
+        let text = `這是一個不大的房間，東西不多——拖把和水桶靠在牆邊，但牆角有幾道明顯的爪痕，還有一段長長的拖行痕跡。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("翻看清潔用具", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("尋常的清潔用具，沒有什麼特別的——只是放的位置，好像刻意避開了牆角那一塊。", () => renderRoom('B1F-H'));
+        });
+
+        createButton("查看牆角的爪痕與拖行痕跡", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            const msg = gameState.monsterBorn
+                ? "痕跡很新，像是不久前才留下的——爪痕的間距，跟人的手掌差不多大。"
+                : "地板上有一道很長的刮痕，看不出來是什麼造成的，也看不出是什麼時候留下的。";
+            showNote(msg, () => renderRoom('B1F-H'));
+        });
+    }
+
+    // ---- B2F-C 冷卻機房 ----
+    function renderCoolingroom() {
+        let text = `大型水冷管線在牆面上縱橫交錯，警示標語貼在管線旁，還有一組閥門。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("連接大型水冷管線降溫", () => {
+            const bad = Math.random() < 0.35;
+            const dead = bad ? updateStats(-8, 3.0) : updateStats(0, -7.0);
+            if (dead) return;
+            showNote(bad ? "水冷管線忽然震動了一下，某處接頭鬆脫，滾燙的蒸氣反而噴了出來，燙得你猛地縮手！" : "冰冷的水流順著管線傳來，體溫以肉眼可見的速度往下掉。", () => renderRoom('B2F-C'));
+        });
+
+        createButton("查看警示標語", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("標語上寫著「非專業人員請勿操作，水壓異常恐有爆管風險」，紅字被水氣暈開了一部分。", () => renderRoom('B2F-C'));
+        });
+
+        createButton("查看閥門", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("閥門上標著操作壓力上限，指針已經逼近紅色區域，你不敢隨便亂轉。", () => renderRoom('B2F-C'));
+        });
+    }
+
+    // ---- B2F-D 管線維修間 ----
+    function renderPiperoom() {
+        let text = `通道很窄，兩側是縱橫交錯的管線，牆上貼著一張管線圖，盡頭有一扇不起眼的觀察窗。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("查看管線圖", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("管線圖標示著整棟樓的水冷與電力循環路線，複雜得像是某種神經網路——這棟樓的每一層，好像都靠著同一套系統，彼此連著。", () => renderRoom('B2F-D'));
+        });
+
+        createButton("透過觀察窗查看", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            let msg;
+            if (gameState.monsterChasing) {
+                msg = "窗外一片漆黑，你卻清楚看見一個模糊的黑影正朝這個方向逼近，速度快得不像人。";
+            } else if (gameState.monsterAlert) {
+                msg = "窗外空蕩蕩的，但你總覺得，角落的陰影裡，有什麼東西剛剛才移動過。";
+            } else {
+                msg = "窗外是一片安靜的黑暗，什麼都看不見，什麼也沒有發生。";
+            }
+            showNote(msg, () => renderRoom('B2F-D'));
+        });
+    }
+
+    // ---- B2F-G 警報控制室 ----
+    function renderAlarmroom() {
+        let text = `總控警報面板嵌在牆上，旁邊是一整排監控螢幕，畫面切換著不同樓層。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("查看監控螢幕", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("螢幕切換過好幾個樓層的畫面，大多空無一人——只有其中一格，畫面雪花一閃，好像有什麼東西剛好經過鏡頭。", () => renderRoom('B2F-G'));
+        });
+
+        createButton(gameState.alarmPulled ? "警報面板(已經拉響過了)" : "拉響總控警報", () => {
+            if (gameState.alarmPulled) {
+                showNote("面板還亮著剛才拉響的紅燈，再按也不會有反應了。", () => renderRoom('B2F-G'));
+                return;
+            }
+            gameState.alarmPulled = true;
+            const started = accumulateAttraction(6);
+            const dead = updateStats(20, -3.0);
+            if (dead) return;
+            if (started) {
+                showNote("刺耳的警報聲響徹整棟樓，緊急電力瞬間灌入——但同時，你清楚聽見，黑暗深處的腳步聲，開始朝這裡狂奔而來！", () => renderRoom('B2F-G'));
+            } else {
+                showNote("警報聲響起的瞬間，緊急電力系統啟動，電量猛地回升不少，體溫也跟著降了下來——但你不確定，這聲音會不會把不該引來的東西，也一起引過來。", () => renderRoom('B2F-G'));
+            }
+        });
+    }
+
+    // ---- B2F-H 廢棄升降梯井 ----
+    function renderElevatorShaft() {
+        let text = `狹窄的豎井貫穿了好幾層樓，升降梯早已停用，纜繩鬆垮地垂掛著，深不見底的黑暗從下方傳來一陣陣潮濕的風。`;
+        if (gameState.monsterBorn) text += `\n\n不知道是不是錯覺，風裡好像夾雜著很輕的、規律的呼吸聲。`;
+        textBox.innerHTML = applyGlitch(text);
+
+        createButton("觀察纜繩", () => {
+            const dead = updateStats(-1, 0);
+            if (dead) return;
+            showNote("纜繩表面銹跡斑斑，有些地方已經斷了幾股鋼絲——不知道還能不能承重，但似乎還堪用。", () => renderRoom('B2F-H'));
+        });
+
+        createButton("攀著纜繩，跨樓層強行移動", () => {
+            controls.innerHTML = '';
+            textBox.innerHTML = applyGlitch(`要去哪一層？纜繩很不穩，跨得越遠，耗的電也越多。`);
+            const currentFloorId = ROOM_FLOOR[gameState.currentRoom];
+            FLOORS.forEach(floor => {
+                if (floor.id === currentFloorId) return;
+                const target = floor.rooms.find(r => !LOCKED_ROOMS.has(r) && r !== 'B2F-B') || floor.rooms[0];
+                navButton(floor.id, () => attemptMove(target, { viaElevator: true }));
+            });
+            navButton("← 放棄，退回豎井", () => renderRoom('B2F-H'));
+        });
+    }
+
     /* ============ 結束處理 ============ */
     function gameOver(message) {
         killChargeTimer();
         gameState.monsterChasing = false;
+        viewport.classList.remove('chase-critical');
         textBox.innerHTML = `<span class="warning-text" style="font-size:14.5px;">${message.replace(/\n/g, '<br>')}</span>`;
         roomLabel.textContent = '';
         controls.innerHTML = '';
@@ -1036,11 +1606,13 @@
                 battery: 60, temp: 36.5, tempRevealed: false, corrupted: false, currentRoom: null, chargeTimer: null, observed: {},
                 lightOn: false, hasIcepack: false, icepackTaken: false, antennaTried: false, serverNoteViews: 0, flashlightOn: false,
                 doorUnlocked: false, doorCodeKnown: false,
-                breakerTripped: false, monsterBorn: false, monsterAlert: false, monsterChasing: false, chaseCounter: 0,
+                waterDrinksLeft: 3, drawerUnlocked: false, alarmPulled: false,
+                breakerTripped: false, monsterBorn: false, monsterAlert: false, monsterAttraction: 0,
+                monsterChasing: false, chaseDistance: CHASE_START_DISTANCE,
                 reachedCore: false, coreArrivalSafe: false,
                 photosDeleted: false, videoDeleted: false, fullChargeCount: 0
             };
-            viewport.classList.remove('light-on', 'overheat-screen');
+            viewport.classList.remove('light-on', 'overheat-screen', 'chase-critical');
             viewport.style.backgroundColor = '#000';
             textBox.style.color = '#e0e0e0';
             tempWrap.classList.add('stat-hidden');
@@ -1070,5 +1642,6 @@
         start(null);
     }
 </script>
+
 </body>
 </html>
